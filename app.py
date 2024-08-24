@@ -23,7 +23,7 @@ def search_serper(query: str) -> List[Dict[str, Any]]:
     }
     try:
         response = requests.request("POST", url, headers=headers, data=payload)
-        response.raise_for_status()  # Esto lanzará una excepción para códigos de estado HTTP no exitosos
+        response.raise_for_status()
         
         data = response.json()
         if 'organic' not in data:
@@ -33,6 +33,8 @@ def search_serper(query: str) -> List[Dict[str, Any]]:
         return data['organic']
     except requests.RequestException as e:
         st.error(f"Error al hacer la solicitud a Serper: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Detalles del error de Serper: {e.response.text}")
         return []
     except json.JSONDecodeError:
         st.error(f"No se pudo decodificar la respuesta JSON de Serper. Respuesta: {response.text}")
@@ -56,10 +58,17 @@ def process_with_together(results: List[Dict[str, Any]], topic: str, author: str
     8. DOI (si está disponible)
 
     Resultados:
-    {json.dumps(results, indent=2)}
+    {json.dumps(results[:5], indent=2)}  # Limitamos a 5 resultados para evitar problemas de longitud
 
     Proporciona la información en formato JSON.
     """
+
+    payload = {
+        "model": "togethercomputer/llama-2-70b-chat",
+        "prompt": prompt,
+        "max_tokens": 2000,
+        "temperature": 0.7
+    }
 
     try:
         response = requests.post(
@@ -68,16 +77,19 @@ def process_with_together(results: List[Dict[str, Any]], topic: str, author: str
                 "Authorization": f"Bearer {st.secrets['TOGETHER_API_KEY']}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": "togethercomputer/llama-2-70b-chat",
-                "prompt": prompt,
-                "max_tokens": 2000,
-                "temperature": 0.7
-            }
+            json=payload
         )
-        response.raise_for_status()  # Esto lanzará una excepción para códigos de estado HTTP no exitosos
+        
+        # Log de la solicitud y respuesta para depuración
+        st.write("Payload enviado a Together AI:", payload)
+        st.write("Código de estado de la respuesta:", response.status_code)
+        st.write("Encabezados de la respuesta:", dict(response.headers))
+
+        response.raise_for_status()
         
         response_json = response.json()
+        st.write("Respuesta completa de Together AI:", response_json)
+
         if 'output' not in response_json:
             st.error(f"La respuesta de Together AI no contiene el campo 'output'. Respuesta completa: {response_json}")
             return []
@@ -90,6 +102,8 @@ def process_with_together(results: List[Dict[str, Any]], topic: str, author: str
 
     except requests.RequestException as e:
         st.error(f"Error al hacer la solicitud a Together AI: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Detalles del error de Together AI: {e.response.text}")
         return []
     except Exception as e:
         st.error(f"Error inesperado al procesar con Together AI: {str(e)}")
