@@ -1,174 +1,56 @@
 import streamlit as st
 import requests
-import json
-from typing import List, Dict, Any
+from bs4 import BeautifulSoup
 
-# Configuración de la página
-st.set_page_config(page_title="Explorador de Citas", page_icon="📚", layout="wide")
-
-# Título y descripción
-st.title("Explorador de Citas")
-st.markdown("""
-    Esta aplicación te ayuda a encontrar citas textuales relevantes de un autor específico sobre un tema en particular.
-    Utiliza Serper para buscar en Google Scholar y Together AI para procesar y extraer información relevante.
-""")
-
-# Función para hacer la búsqueda en Serper
-def search_serper(query: str) -> List[Dict[str, Any]]:
-    url = "https://google.serper.dev/scholar"
-    payload = json.dumps({"q": query, "num": 20})
+# Función para buscar citas en Google Scholar
+def buscar_citas_en_scholar(tema):
+    url = f"https://scholar.google.com/scholar?q={tema.replace(' ', '+')}"
     headers = {
-        'X-API-KEY': st.secrets["SERPER_API_KEY"],
-        'Content-Type': 'application/json'
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
-    try:
-        response = requests.request("POST", url, headers=headers, data=payload)
-        response.raise_for_status()
+    
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    resultados = []
+    
+    # Extraer los resultados
+    for entry in soup.select('.gs_ri'):
+        titulo = entry.select_one('.gs_rt').text
+        cita = entry.select_one('.gs_or_ggsm').text if entry.select_one('.gs_or_ggsm') else "No disponible"
+        referencia = entry.select_one('.gs_a').text
+        resultados.append({
+            "titulo": titulo,
+            "cita": cita,
+            "referencia": referencia
+        })
+    
+    return resultados[:20]
+
+# Configuración de la página de Streamlit
+st.set_page_config(page_title="Explorador de Citas por Tema", page_icon="🔍")
+
+# Título de la aplicación
+st.title("🔍 Explorador de Citas por Tema")
+
+# Formulario de entrada
+tema = st.text_input("Ingresa el tema de interés:")
+
+# Botón de búsqueda
+if st.button("Buscar"):
+    if tema:
+        st.write("Buscando citas para el tema:", tema)
+        resultados = buscar_citas_en_scholar(tema)
         
-        data = response.json()
-        if 'organic' not in data:
-            st.error(f"La respuesta de Serper no contiene el campo 'organic'. Respuesta completa: {data}")
-            return []
-        
-        return data['organic']
-    except requests.RequestException as e:
-        st.error(f"Error al hacer la solicitud a Serper: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            st.error(f"Detalles del error de Serper: {e.response.text}")
-        return []
-    except json.JSONDecodeError:
-        st.error(f"No se pudo decodificar la respuesta JSON de Serper. Respuesta: {response.text}")
-        return []
-    except Exception as e:
-        st.error(f"Error inesperado al buscar con Serper: {str(e)}")
-        return []
-
-# Función para procesar resultados con Together AI
-def process_with_together(results: List[Dict[str, Any]], topic: str, author: str) -> List[Dict[str, Any]]:
-    prompt = f"""
-    Analiza los siguientes resultados de búsqueda para el tema "{topic}" y el autor "{author}".
-    Para cada resultado, extrae o genera la siguiente información:
-    1. Título del trabajo
-    2. Una cita textual relevante (si está disponible, o genera una basada en el resumen)
-    3. Autores
-    4. Año de publicación
-    5. Nombre de la revista o editorial
-    6. Volumen e número (si aplica)
-    7. Páginas (si aplica)
-    8. DOI (si está disponible)
-
-    Resultados:
-    {json.dumps(results[:5], indent=2)}  # Limitamos a 5 resultados para evitar problemas de longitud
-
-    Proporciona la información en formato JSON.
-    """
-
-    payload = {
-        "model": "togethercomputer/llama-2-70b-chat",
-        "prompt": prompt,
-        "max_tokens": 2000,
-        "temperature": 0.7
-    }
-
-    try:
-        response = requests.post(
-            "https://api.together.xyz/inference",
-            headers={
-                "Authorization": f"Bearer {st.secrets['TOGETHER_API_KEY']}",
-                "Content-Type": "application/json"
-            },
-            json=payload
-        )
-        
-        # Log de la solicitud y respuesta para depuración
-        st.write("Payload enviado a Together AI:", payload)
-        st.write("Código de estado de la respuesta:", response.status_code)
-        st.write("Encabezados de la respuesta:", dict(response.headers))
-
-        response.raise_for_status()
-        
-        response_json = response.json()
-        st.write("Respuesta completa de Together AI:", response_json)
-
-        if 'output' not in response_json:
-            st.error(f"La respuesta de Together AI no contiene el campo 'output'. Respuesta completa: {response_json}")
-            return []
-
-        try:
-            return json.loads(response_json['output'])
-        except json.JSONDecodeError:
-            st.error(f"No se pudo decodificar la salida JSON de Together AI. Salida: {response_json['output']}")
-            return []
-
-    except requests.RequestException as e:
-        st.error(f"Error al hacer la solicitud a Together AI: {str(e)}")
-        if hasattr(e, 'response') and e.response is not None:
-            st.error(f"Detalles del error de Together AI: {e.response.text}")
-        return []
-    except Exception as e:
-        st.error(f"Error inesperado al procesar con Together AI: {str(e)}")
-        return []
-
-# Interfaz de usuario
-topic = st.text_input("Tema:", placeholder="Ej: Inteligencia Artificial")
-author = st.text_input("Autor:", placeholder="Ej: Alan Turing")
-
-if st.button("Buscar Citas"):
-    if topic and author:
-        with st.spinner('Buscando citas...'):
-            # Realizar búsqueda
-            query = f"{topic} author:\"{author}\""
-            st.write(f"Realizando búsqueda con query: {query}")
-            search_results = search_serper(query)
-            st.write(f"Número de resultados obtenidos: {len(search_results)}")
-            
-            if not search_results:
-                st.warning("No se encontraron resultados de búsqueda. Por favor, intente con diferentes términos.")
-            else:
-                # Procesar resultados
-                processed_results = process_with_together(search_results, topic, author)
-
-                if not processed_results:
-                    st.warning("No se pudieron procesar los resultados. Por favor, intente de nuevo.")
-                else:
-                    # Mostrar resultados
-                    st.subheader(f"Resultados de la búsqueda para \"{topic}\" de {author}")
-                    
-                    for i, citation in enumerate(processed_results, 1):
-                        with st.expander(f"{i}. {citation.get('title', 'Título no disponible')}"):
-                            st.markdown(f"**Cita textual:** _{citation.get('excerpt', 'No disponible')}_")
-                            st.markdown(f"""
-                            **Referencia:**
-                            {citation.get('authors', 'Autores no especificados')}. ({citation.get('year', 'Año no especificado')}). {citation.get('title', 'Título no disponible')}. 
-                            *{citation.get('journal', 'Fuente no especificada')}*
-                            {f", {citation['volume']}" if 'volume' in citation else ''}
-                            {f"({citation['issue']})" if 'issue' in citation else ''}
-                            {f": {citation['pages']}" if 'pages' in citation else ''}.
-                            {f"DOI: {citation['doi']}" if 'doi' in citation else ''}
-                            """)
+        if resultados:
+            st.write(f"Se encontraron {len(resultados)} citas:")
+            for idx, resultado in enumerate(resultados):
+                st.subheader(f"Cita {idx + 1}")
+                st.write(f"**Título:** {resultado['titulo']}")
+                st.write(f"**Cita textual:** {resultado['cita']}")
+                st.write(f"**Referencia:** {resultado['referencia']}")
+                st.write("---")
+        else:
+            st.write("No se encontraron citas para el tema especificado.")
     else:
-        st.warning("Por favor, ingrese tanto el tema como el autor para realizar la búsqueda.")
-
-# Explicación adicional
-st.markdown("""
----
-### ¿Cómo funciona esta aplicación?
-
-1. Ingresas un tema de interés y el nombre de un autor en el formulario.
-2. La aplicación utiliza la API de Serper para buscar en Google Scholar citas relacionadas con el tema, escritas por el autor especificado.
-3. Los resultados de la búsqueda se procesan utilizando la API de Together AI para extraer y estructurar la información relevante.
-4. Se muestran hasta 20 resultados, cada uno con el título del trabajo, una cita textual relevante (si está disponible) y la referencia bibliográfica completa.
-
-Esta herramienta es ideal para investigadores, estudiantes o cualquier persona interesada en explorar el pensamiento de un autor sobre un tema específico.
-""")
-
-# Nota sobre el uso de APIs
-st.sidebar.markdown("""
-### Nota sobre el uso de APIs
-
-Esta aplicación utiliza las siguientes APIs:
-- Serper API para realizar búsquedas en Google Scholar
-- Together AI API para procesar y estructurar los resultados
-
-Las claves API están almacenadas de forma segura en los secrets de Streamlit y no son accesibles públicamente.
-""")
+        st.write("Por favor, ingresa un tema para buscar citas.")
