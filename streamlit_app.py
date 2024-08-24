@@ -17,7 +17,7 @@ def buscar_citas_en_scholar(tema):
     # Extraer los resultados
     for entry in soup.select('.gs_ri'):
         titulo = entry.select_one('.gs_rt').text
-        cita = entry.select_one('.gs_or_ggsm').text if entry.select_one('.gs_or_ggsm') else "No disponible"
+        cita = entry.select_one('.gs_rs').text if entry.select_one('.gs_rs') else "No disponible"
         referencia = entry.select_one('.gs_a').text
         resultados.append({
             "titulo": titulo,
