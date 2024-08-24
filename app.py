@@ -3,9 +3,45 @@ import requests
 import json
 from typing import List, Dict, Any
 
-# ... [El resto del código anterior permanece igual] ...
+# Configuración de la página
+st.set_page_config(page_title="Explorador de Citas", page_icon="📚", layout="wide")
 
-# Función actualizada para procesar resultados con Together AI
+# Título y descripción
+st.title("Explorador de Citas")
+st.markdown("""
+    Esta aplicación te ayuda a encontrar citas textuales relevantes de un autor específico sobre un tema en particular.
+    Utiliza Serper para buscar en Google Scholar y Together AI para procesar y extraer información relevante.
+""")
+
+# Función para hacer la búsqueda en Serper
+def search_serper(query: str) -> List[Dict[str, Any]]:
+    url = "https://google.serper.dev/scholar"
+    payload = json.dumps({"q": query, "num": 20})
+    headers = {
+        'X-API-KEY': st.secrets["SERPER_API_KEY"],
+        'Content-Type': 'application/json'
+    }
+    try:
+        response = requests.request("POST", url, headers=headers, data=payload)
+        response.raise_for_status()  # Esto lanzará una excepción para códigos de estado HTTP no exitosos
+        
+        data = response.json()
+        if 'organic' not in data:
+            st.error(f"La respuesta de Serper no contiene el campo 'organic'. Respuesta completa: {data}")
+            return []
+        
+        return data['organic']
+    except requests.RequestException as e:
+        st.error(f"Error al hacer la solicitud a Serper: {str(e)}")
+        return []
+    except json.JSONDecodeError:
+        st.error(f"No se pudo decodificar la respuesta JSON de Serper. Respuesta: {response.text}")
+        return []
+    except Exception as e:
+        st.error(f"Error inesperado al buscar con Serper: {str(e)}")
+        return []
+
+# Función para procesar resultados con Together AI
 def process_with_together(results: List[Dict[str, Any]], topic: str, author: str) -> List[Dict[str, Any]]:
     prompt = f"""
     Analiza los siguientes resultados de búsqueda para el tema "{topic}" y el autor "{author}".
@@ -68,33 +104,37 @@ if st.button("Buscar Citas"):
         with st.spinner('Buscando citas...'):
             # Realizar búsqueda
             query = f"{topic} author:\"{author}\""
+            st.write(f"Realizando búsqueda con query: {query}")
             search_results = search_serper(query)
+            st.write(f"Número de resultados obtenidos: {len(search_results)}")
             
-            # Procesar resultados
-            processed_results = process_with_together(search_results, topic, author)
-
-            if not processed_results:
-                st.warning("No se pudieron procesar los resultados. Por favor, intente de nuevo.")
+            if not search_results:
+                st.warning("No se encontraron resultados de búsqueda. Por favor, intente con diferentes términos.")
             else:
-                # Mostrar resultados
-                st.subheader(f"Resultados de la búsqueda para \"{topic}\" de {author}")
-                
-                for i, citation in enumerate(processed_results, 1):
-                    with st.expander(f"{i}. {citation.get('title', 'Título no disponible')}"):
-                        st.markdown(f"**Cita textual:** _{citation.get('excerpt', 'No disponible')}_")
-                        st.markdown(f"""
-                        **Referencia:**
-                        {citation.get('authors', 'Autores no especificados')}. ({citation.get('year', 'Año no especificado')}). {citation.get('title', 'Título no disponible')}. 
-                        *{citation.get('journal', 'Fuente no especificada')}*
-                        {f", {citation['volume']}" if 'volume' in citation else ''}
-                        {f"({citation['issue']})" if 'issue' in citation else ''}
-                        {f": {citation['pages']}" if 'pages' in citation else ''}.
-                        {f"DOI: {citation['doi']}" if 'doi' in citation else ''}
-                        """)
+                # Procesar resultados
+                processed_results = process_with_together(search_results, topic, author)
+
+                if not processed_results:
+                    st.warning("No se pudieron procesar los resultados. Por favor, intente de nuevo.")
+                else:
+                    # Mostrar resultados
+                    st.subheader(f"Resultados de la búsqueda para \"{topic}\" de {author}")
+                    
+                    for i, citation in enumerate(processed_results, 1):
+                        with st.expander(f"{i}. {citation.get('title', 'Título no disponible')}"):
+                            st.markdown(f"**Cita textual:** _{citation.get('excerpt', 'No disponible')}_")
+                            st.markdown(f"""
+                            **Referencia:**
+                            {citation.get('authors', 'Autores no especificados')}. ({citation.get('year', 'Año no especificado')}). {citation.get('title', 'Título no disponible')}. 
+                            *{citation.get('journal', 'Fuente no especificada')}*
+                            {f", {citation['volume']}" if 'volume' in citation else ''}
+                            {f"({citation['issue']})" if 'issue' in citation else ''}
+                            {f": {citation['pages']}" if 'pages' in citation else ''}.
+                            {f"DOI: {citation['doi']}" if 'doi' in citation else ''}
+                            """)
     else:
         st.warning("Por favor, ingrese tanto el tema como el autor para realizar la búsqueda.")
 
-# ... [El resto del código permanece igual] ...
 # Explicación adicional
 st.markdown("""
 ---
